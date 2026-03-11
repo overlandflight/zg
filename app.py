@@ -1,44 +1,8 @@
-import os
-import json
-import logging
-import requests
-from bs4 import BeautifulSoup
-import re
-from flask import Flask, jsonify, request
-from flask_cors import CORS
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-app = Flask(__name__)
-CORS(app)
-
-def fetch_doctor_page(code):
-    """模拟浏览器访问同花顺诊股页面，返回HTML（gbk编码）"""
-    url = f"https://m.10jqka.com.cn/doctor/{code}/"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Referer": "https://m.10jqka.com.cn/",
-    }
-    try:
-        resp = requests.get(url, headers=headers, timeout=8)
-        resp.encoding = 'gbk'
-        if resp.status_code == 200:
-            logging.info(f"成功获取 {code} 页面，长度 {len(resp.text)}")
-            return resp.text
-        else:
-            logging.error(f"HTTP错误 {resp.status_code} for {code}")
-    except Exception as e:
-        logging.error(f"请求异常: {e}")
-    return None
-
 def parse_doctor_page(html):
-    """解析HTML，提取文本数据和图表数据"""
     soup = BeautifulSoup(html, 'html.parser')
     data = {}
 
-    # ----- 原有文本数据 -----
+    # ----- 原有文本数据（保持不变）-----
     # 综合评分
     score_elem = soup.find('span', class_='J_compScore')
     data['score'] = score_elem.text.strip() if score_elem else 'N/A'
@@ -130,13 +94,12 @@ def parse_doctor_page(html):
     data.setdefault('profitability', 'N/A')
     data.setdefault('growth', 'N/A')
 
-    # ----- 新增图表数据 -----
+    # ----- 图表数据（保持不变）-----
     # 1. 综合评分细分（用于雷达图）
     allcatescore_input = soup.find('input', id='allcatescore')
     if allcatescore_input and allcatescore_input.get('value'):
         try:
             radar_data = json.loads(allcatescore_input['value'])
-            # 将值转换为浮点数，方便前端使用
             for k in radar_data:
                 radar_data[k] = float(radar_data[k])
             data['radar_data'] = radar_data
@@ -149,7 +112,6 @@ def parse_doctor_page(html):
     if stock_tendency and stock_tendency.get('value'):
         try:
             tech_history = json.loads(stock_tendency['value'])
-            # 处理日期格式，保留需要的数据
             data['tech_history'] = tech_history
         except:
             data['tech_history'] = []
@@ -167,35 +129,40 @@ def parse_doctor_page(html):
     else:
         data['fund_history'] = []
 
+    # ----- 新增：机构分析 -----
+    institution_module = soup.find('div', class_='module institution')
+    if institution_module:
+        # 机构关注度描述（第一个 p 标签）
+        attention_p = institution_module.find('div', class_='block').find('p')
+        data['institution_attention'] = attention_p.text.strip() if attention_p else 'N/A'
+
+        # 机构持仓变化描述（第二个 block 中的 p 标签）
+        blocks = institution_module.find_all('div', class_='block')
+        if len(blocks) >= 2:
+            position_p = blocks[1].find('p')
+            data['institution_position'] = position_p.text.strip() if position_p else 'N/A'
+        else:
+            data['institution_position'] = 'N/A'
+
+        # 可选：提取机构评级表格（如果有数据）
+        table = institution_module.find('table', class_='jigou-table')
+        if table and table.find('tbody').find_all('tr'):
+            rows = []
+            for tr in table.find('tbody').find_all('tr'):
+                tds = tr.find_all('td')
+                if len(tds) >= 4:
+                    rows.append({
+                        'org': tds[0].text.strip(),
+                        'rating': tds[1].text.strip(),
+                        'direction': tds[2].text.strip(),
+                        'prev_rating': tds[3].text.strip()
+                    })
+            data['institution_table'] = rows
+        else:
+            data['institution_table'] = []
+    else:
+        data['institution_attention'] = 'N/A'
+        data['institution_position'] = 'N/A'
+        data['institution_table'] = []
+
     return data
-
-@app.route('/')
-def home():
-    return "诊股API运行中。使用 /api/doctor?code=股票代码 获取数据（含图表数据），添加 &debug=1 可查看原始HTML"
-
-@app.route('/health')
-def health():
-    return "OK", 200
-
-@app.route('/api/doctor', methods=['GET'])
-def doctor_api():
-    code = request.args.get('code', '000778')
-    debug = request.args.get('debug', '0') == '1'
-
-    logging.info(f"收到请求，股票代码: {code}, debug={debug}")
-
-    html = fetch_doctor_page(code)
-    if not html:
-        return jsonify({'error': '无法获取页面'}), 500
-
-    if debug:
-        return html
-
-    data = parse_doctor_page(html)
-    data['code'] = code
-    return jsonify(data)
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    logging.info(f"启动应用，监听端口 {port}")
-    app.run(host='0.0.0.0', port=port, debug=False)
