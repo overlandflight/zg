@@ -6,7 +6,7 @@ import re
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-# 配置日志，方便在 Railway 控制台查看错误
+# 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
@@ -22,7 +22,6 @@ def fetch_doctor_page(code):
         "Referer": "https://m.10jqka.com.cn/",
     }
     try:
-        # 设置超时，避免长时间阻塞
         resp = requests.get(url, headers=headers, timeout=8)
         resp.encoding = 'utf-8'
         if resp.status_code == 200:
@@ -119,8 +118,8 @@ def doctor_api():
         logging.error(f"无法获取 {code} 的页面")
         return jsonify({'error': '无法获取页面，可能是网络问题或股票代码错误'}), 500
 
-    # 调试模式：先返回HTML以查看结构（后续可注释掉）
-    # return html
+    # 调试：先返回HTML，确认抓取是否成功
+    # return html  # 如果需要查看原始HTML，取消这行注释并注释下面两行
 
     data = parse_doctor_page(html)
     data['code'] = code
