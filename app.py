@@ -13,7 +13,7 @@ app = Flask(__name__)
 CORS(app)
 
 def fetch_doctor_page(code):
-    """模拟浏览器访问同花顺诊股页面，返回HTML（使用gbk编码）"""
+    """模拟浏览器访问同花顺诊股页面，返回HTML（gbk编码）"""
     url = f"https://m.10jqka.com.cn/doctor/{code}/"
     headers = {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1",
@@ -23,41 +23,34 @@ def fetch_doctor_page(code):
     }
     try:
         resp = requests.get(url, headers=headers, timeout=8)
-        # 同花顺移动站使用gbk编码
         resp.encoding = 'gbk'
         if resp.status_code == 200:
             logging.info(f"成功获取 {code} 页面，长度 {len(resp.text)}")
             return resp.text
         else:
             logging.error(f"HTTP错误 {resp.status_code} for {code}")
-    except requests.exceptions.Timeout:
-        logging.error(f"请求超时 {url}")
-    except requests.exceptions.ConnectionError:
-        logging.error(f"连接错误 {url}")
     except Exception as e:
         logging.error(f"请求异常: {e}")
     return None
 
 def parse_doctor_page(html):
-    """根据实际HTML结构解析关键数据"""
+    """解析HTML，提取文本数据和图表数据"""
     soup = BeautifulSoup(html, 'html.parser')
     data = {}
 
-    # 1. 综合评分
+    # ----- 原有文本数据 -----
+    # 综合评分
     score_elem = soup.find('span', class_='J_compScore')
     data['score'] = score_elem.text.strip() if score_elem else 'N/A'
-
-    # 2. 评级
+    # 评级
     rating_elem = soup.find('div', class_='syn-advice')
     data['rating'] = rating_elem.text.strip() if rating_elem else 'N/A'
-
-    # 3. 涨跌幅：从 hidden input stockTendency 中提取最新数据
+    # 涨跌幅
     stock_tendency = soup.find('input', id='stockTendency')
     if stock_tendency and stock_tendency.get('value'):
         try:
             tendency_list = json.loads(stock_tendency['value'])
-            if tendency_list and len(tendency_list) > 0:
-                # 第一条是最近一个交易日的数据
+            if tendency_list:
                 latest = tendency_list[0]
                 data['change_percent'] = latest.get('stock', 'N/A') + '%'
             else:
@@ -66,8 +59,7 @@ def parse_doctor_page(html):
             data['change_percent'] = 'N/A'
     else:
         data['change_percent'] = 'N/A'
-
-    # 4. 打败了xx%的股票
+    # 打败比例
     beat_elem = soup.find('div', class_='syn-db')
     if beat_elem:
         beat_text = beat_elem.text
@@ -75,10 +67,8 @@ def parse_doctor_page(html):
         data['beat_percent'] = match.group(1) if match else '0'
     else:
         data['beat_percent'] = '0'
-
-    # 5. 短期、中期、长期分析
+    # 短中长期
     analysis_items = soup.find_all('li', class_='topBorder')
-    # 通常前三个li分别是短期、中期、长期
     terms = ['short_term', 'mid_term', 'long_term']
     for i, term in enumerate(terms):
         if i < len(analysis_items):
@@ -86,23 +76,19 @@ def parse_doctor_page(html):
             data[term] = con_span.text.strip() if con_span else 'N/A'
         else:
             data[term] = 'N/A'
-
-    # 6. 技术分析段落（在 skill 模块的第一个 p 标签）
+    # 技术分析
     skill_module = soup.find('div', class_='module skill')
     if skill_module:
         tech_p = skill_module.find('div', class_='block').find('p')
         data['tech_analysis'] = tech_p.text.strip() if tech_p else 'N/A'
     else:
         data['tech_analysis'] = 'N/A'
-
-    # 7. 压力位、支撑位、成本价
-    # 在 skill 模块的下一个 block 中
+    # 压力位、支撑位、成本价
     skill_blocks = skill_module.find_all('div', class_='block') if skill_module else []
     if len(skill_blocks) >= 2:
         clearfix_div = skill_blocks[1].find('div', class_='clearfix')
         if clearfix_div:
             spans = clearfix_div.find_all('span')
-            # 提取数值
             for span in spans:
                 text = span.text
                 if '压力位' in text:
@@ -111,23 +97,19 @@ def parse_doctor_page(html):
                     data['support'] = text.replace('支撑位：', '').strip()
                 elif '成本价' in text:
                     data['cost'] = text.replace('成本价：', '').strip()
-    # 如果没有提取到，设为N/A
     data.setdefault('pressure', 'N/A')
     data.setdefault('support', 'N/A')
     data.setdefault('cost', 'N/A')
-
-    # 8. 资金分析
+    # 资金分析
     fund_module = soup.find('div', class_='module fund')
     if fund_module:
         fund_p = fund_module.find('div', class_='block').find('p')
         data['fund_analysis'] = fund_p.text.strip() if fund_p else 'N/A'
     else:
         data['fund_analysis'] = 'N/A'
-
-    # 9. 公司分析：估值区间、盈利能力、成长能力
+    # 公司分析
     company_module = soup.find('div', class_='module company')
     if company_module:
-        # 估值区间：从 gzqj 中的三个 span 获取
         gzqj = company_module.find('div', class_='gzqj')
         if gzqj:
             spans = gzqj.find_all('span')
@@ -137,26 +119,59 @@ def parse_doctor_page(html):
                 data['valuation_range'] = 'N/A'
         else:
             data['valuation_range'] = 'N/A'
-
-        # 盈利能力和成长能力：后面的 p 标签
         p_tags = company_module.find_all('p')
-        # 通常有三个 p：盈利能力、成长能力、机构预测
         for p in p_tags:
             text = p.text
             if '盈利能力' in text:
                 data['profitability'] = text.strip()
             elif '成长能力' in text:
                 data['growth'] = text.strip()
-    # 如果没找到，设置默认值
     data.setdefault('valuation_range', 'N/A')
     data.setdefault('profitability', 'N/A')
     data.setdefault('growth', 'N/A')
+
+    # ----- 新增图表数据 -----
+    # 1. 综合评分细分（用于雷达图）
+    allcatescore_input = soup.find('input', id='allcatescore')
+    if allcatescore_input and allcatescore_input.get('value'):
+        try:
+            radar_data = json.loads(allcatescore_input['value'])
+            # 将值转换为浮点数，方便前端使用
+            for k in radar_data:
+                radar_data[k] = float(radar_data[k])
+            data['radar_data'] = radar_data
+        except:
+            data['radar_data'] = {}
+    else:
+        data['radar_data'] = {}
+
+    # 2. 技术走势历史数据（用于折线图）
+    if stock_tendency and stock_tendency.get('value'):
+        try:
+            tech_history = json.loads(stock_tendency['value'])
+            # 处理日期格式，保留需要的数据
+            data['tech_history'] = tech_history
+        except:
+            data['tech_history'] = []
+    else:
+        data['tech_history'] = []
+
+    # 3. 资金流向历史数据（用于柱状图）
+    chart_data_div = soup.find('div', id='chartData')
+    if chart_data_div and chart_data_div.text:
+        try:
+            fund_history = json.loads(chart_data_div.text)
+            data['fund_history'] = fund_history
+        except:
+            data['fund_history'] = []
+    else:
+        data['fund_history'] = []
 
     return data
 
 @app.route('/')
 def home():
-    return "诊股API运行中。使用 /api/doctor?code=股票代码 获取数据，添加 &debug=1 可查看原始HTML"
+    return "诊股API运行中。使用 /api/doctor?code=股票代码 获取数据（含图表数据），添加 &debug=1 可查看原始HTML"
 
 @app.route('/health')
 def health():
@@ -171,8 +186,7 @@ def doctor_api():
 
     html = fetch_doctor_page(code)
     if not html:
-        logging.error(f"无法获取 {code} 的页面")
-        return jsonify({'error': '无法获取页面，可能是网络问题或股票代码错误'}), 500
+        return jsonify({'error': '无法获取页面'}), 500
 
     if debug:
         return html
