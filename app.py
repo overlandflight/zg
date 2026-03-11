@@ -6,7 +6,6 @@ import re
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-# 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
@@ -38,10 +37,11 @@ def fetch_doctor_page(code):
     return None
 
 def parse_doctor_page(html):
-    """解析HTML，提取关键数据"""
+    """解析HTML，提取关键数据（待调整选择器）"""
     soup = BeautifulSoup(html, 'html.parser')
     data = {}
 
+    # --- 以下选择器需要根据实际HTML调整 ---
     # 综合评分
     score_elem = soup.find('div', class_='score') or soup.find('span', class_='num')
     data['score'] = score_elem.text.strip() if score_elem else 'N/A'
@@ -102,7 +102,7 @@ def parse_doctor_page(html):
 
 @app.route('/')
 def home():
-    return "诊股API运行中。使用 /api/doctor?code=股票代码 获取数据"
+    return "诊股API运行中。使用 /api/doctor?code=股票代码 获取数据，添加 &debug=1 可查看原始HTML"
 
 @app.route('/health')
 def health():
@@ -111,16 +111,20 @@ def health():
 @app.route('/api/doctor', methods=['GET'])
 def doctor_api():
     code = request.args.get('code', '000778')
-    logging.info(f"收到请求，股票代码: {code}")
+    debug = request.args.get('debug', '0') == '1'  # 如果 debug=1 则返回原始HTML
+
+    logging.info(f"收到请求，股票代码: {code}, debug={debug}")
 
     html = fetch_doctor_page(code)
     if not html:
         logging.error(f"无法获取 {code} 的页面")
         return jsonify({'error': '无法获取页面，可能是网络问题或股票代码错误'}), 500
 
-    # 调试：先返回HTML，确认抓取是否成功
-    # return html  # 如果需要查看原始HTML，取消这行注释并注释下面两行
+    # 调试模式：返回原始HTML
+    if debug:
+        return html
 
+    # 正常解析
     data = parse_doctor_page(html)
     data['code'] = code
     return jsonify(data)
