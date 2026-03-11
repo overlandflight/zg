@@ -36,6 +36,16 @@ def parse_doctor_page(html):
     soup = BeautifulSoup(html, 'html.parser')
     data = {}
 
+    # ----- 股票名称 -----
+    stock_name_elem = soup.find('div', class_='stockName')
+    if stock_name_elem:
+        full_text = stock_name_elem.text.strip()
+        # 格式如 "新兴铸管(000778)"，提取括号前的内容
+        name_part = full_text.split('(')[0].strip()
+        data['stock_name'] = name_part if name_part else full_text
+    else:
+        data['stock_name'] = 'N/A'
+
     # ----- 文本数据 -----
     score_elem = soup.find('span', class_='J_compScore')
     data['score'] = score_elem.text.strip() if score_elem else 'N/A'
