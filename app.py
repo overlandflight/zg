@@ -40,7 +40,6 @@ def parse_doctor_page(html):
     stock_name_elem = soup.find('div', class_='stockName')
     if stock_name_elem:
         full_text = stock_name_elem.text.strip()
-        # 格式如 "新兴铸管(000778)"，提取括号前的内容
         name_part = full_text.split('(')[0].strip()
         data['stock_name'] = name_part if name_part else full_text
     else:
@@ -101,12 +100,24 @@ def parse_doctor_page(html):
     data.setdefault('pressure', 'N/A')
     data.setdefault('support', 'N/A')
     data.setdefault('cost', 'N/A')
+    
+    # 资金分析及主力控盘
     fund_module = soup.find('div', class_='module fund')
     if fund_module:
-        fund_p = fund_module.find('div', class_='block').find('p')
-        data['fund_analysis'] = fund_p.text.strip() if fund_p else 'N/A'
+        blocks = fund_module.find_all('div', class_='block')
+        if len(blocks) >= 1:
+            fund_p = blocks[0].find('p')
+            data['fund_analysis'] = fund_p.text.strip() if fund_p else 'N/A'
+        if len(blocks) >= 2:
+            main_control_p = blocks[1].find('p')
+            data['main_control'] = main_control_p.text.strip() if main_control_p else 'N/A'
+        else:
+            data['main_control'] = 'N/A'
     else:
         data['fund_analysis'] = 'N/A'
+        data['main_control'] = 'N/A'
+
+    # 公司分析
     company_module = soup.find('div', class_='module company')
     if company_module:
         gzqj = company_module.find('div', class_='gzqj')
